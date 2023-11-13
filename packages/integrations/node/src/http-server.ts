@@ -1,7 +1,9 @@
+import type { AstroUserConfig } from 'astro/config';
 import https from 'https';
 import fs from 'node:fs';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
+import path from 'path';
 import send from 'send';
 import enableDestroy from 'server-destroy';
 
@@ -23,12 +25,55 @@ function parsePathname(pathname: string, host: string | undefined, port: number)
 
 export function createServer(
 	{ client, port, host, removeBase }: CreateServerOptions,
-	handler: http.RequestListener
+	handler: http.RequestListener,
+	trailingSlash: AstroUserConfig['trailingSlash']
 ) {
 	const listener: http.RequestListener = (req, res) => {
 		if (req.url) {
-			let pathname: string | undefined = removeBase(req.url);
-			pathname = pathname[0] === '/' ? pathname : '/' + pathname;
+			const [urlPath, urlQuery] = req.url.split('?');
+			const filePath = path.join(fileURLToPath(client), removeBase(urlPath));
+
+			let pathname: string;
+			let isDirectory = false;
+			try {
+				isDirectory = fs.lstatSync(filePath).isDirectory();
+			}
+			catch (err) { }
+
+			if (!trailingSlash) // should never happen
+				trailingSlash = 'ignore';
+
+			const hasSlash = urlPath.endsWith('/');
+			switch (trailingSlash) {
+				case "never":
+					if (isDirectory && hasSlash) {
+						pathname = urlPath.slice(0, -1) + (urlQuery ? "?" + urlQuery : "");
+						res.statusCode = 301;
+						res.setHeader('Location', pathname);
+					} else pathname = urlPath;
+					// intentionally fall through
+				case "ignore":
+					{
+						if (isDirectory && !hasSlash) {
+							pathname = urlPath + "/index.html";
+						} else
+							pathname = urlPath;
+					}
+					break;
+				case "always":
+					if (!hasSlash) {
+						pathname = urlPath + '/' +(urlQuery ? "?" + urlQuery : "");
+						res.statusCode = 301;
+						res.setHeader('Location', pathname);
+					} else
+						pathname = urlPath;
+				break;
+			}
+			pathname = removeBase(pathname);
+
+			if (urlQuery && !pathname.includes('?')) {
+				pathname = pathname + '?' + urlQuery;
+			}
 			const encodedURI = parsePathname(pathname, host, port);
 
 			if (!encodedURI) {
@@ -53,20 +98,6 @@ export function createServer(
 				}
 				// File not found, forward to the SSR handler
 				handler(req, res);
-			});
-			stream.on('directory', () => {
-				// On directory find, redirect to the trailing slash
-				let location: string;
-				if (req.url!.includes('?')) {
-					const [url = '', search] = req.url!.split('?');
-					location = `${url}/?${search}`;
-				} else {
-					location = req.url + '/';
-				}
-
-				res.statusCode = 301;
-				res.setHeader('Location', location);
-				res.end(location);
 			});
 			stream.on('file', () => {
 				forwardError = true;
