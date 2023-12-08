@@ -1,7 +1,7 @@
 import { teardown } from '@astrojs/compiler';
 import * as eslexer from 'es-module-lexer';
 import glob from 'fast-glob';
-import { bgGreen, bgMagenta, black, dim } from 'kleur/colors';
+import { bgGreen, bgMagenta, black, green } from 'kleur/colors';
 import fs from 'node:fs';
 import path, { extname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -51,17 +51,15 @@ export async function viteBuild(opts: StaticBuildOptions) {
 	// Build internals needed by the CSS plugin
 	const internals = createBuildInternals();
 
-	for (const [component, pageDataList] of Object.entries(allPages)) {
-		for (const pageData of pageDataList) {
-			const astroModuleURL = new URL('./' + component, settings.config.root);
-			const astroModuleId = prependForwardSlash(component);
+	for (const [component, pageData] of Object.entries(allPages)) {
+		const astroModuleURL = new URL('./' + component, settings.config.root);
+		const astroModuleId = prependForwardSlash(component);
 
-			// Track the page data in internals
-			trackPageData(internals, component, pageData, astroModuleId, astroModuleURL);
+		// Track the page data in internals
+		trackPageData(internals, component, pageData, astroModuleId, astroModuleURL);
 
-			if (!routeIsRedirect(pageData.route)) {
-				pageInput.add(astroModuleId);
-			}
+		if (!routeIsRedirect(pageData.route)) {
+			pageInput.add(astroModuleId);
 		}
 	}
 
@@ -80,7 +78,8 @@ export async function viteBuild(opts: StaticBuildOptions) {
 	const ssrTime = performance.now();
 	opts.logger.info('build', `Building ${settings.config.output} entrypoints...`);
 	const ssrOutput = await ssrBuild(opts, internals, pageInput, container);
-	opts.logger.info('build', dim(`Completed in ${getTimeStat(ssrTime, performance.now())}.`));
+	opts.logger.info('build', green(`✓ Completed in ${getTimeStat(ssrTime, performance.now())}.`));
+
 	settings.timer.end('SSR build');
 
 	settings.timer.start('Client build');
@@ -149,17 +148,14 @@ async function ssrBuild(
 	const { allPages, settings, viteConfig } = opts;
 	const ssr = isServerLikeOutput(settings.config);
 	const out = getOutputDirectory(settings.config);
-	const routes = Object.values(allPages)
-		.flat()
-		.map((pageData) => pageData.route);
+	const routes = Object.values(allPages).flatMap((pageData) => pageData.route);
 	const isContentCache = !ssr && settings.config.experimental.contentCollectionCache;
 	const { lastVitePlugins, vitePlugins } = await container.runBeforeHook('server', input);
 
 	const viteBuildConfig: vite.InlineConfig = {
 		...viteConfig,
 		mode: viteConfig.mode || 'production',
-		// Check using `settings...` as `viteConfig` always defaults to `warn` by Astro
-		logLevel: settings.config.vite.logLevel ?? 'error',
+		logLevel: viteConfig.logLevel ?? 'error',
 		build: {
 			target: 'esnext',
 			// Vite defaults cssMinify to false in SSR by default, but we want to minify it
@@ -272,7 +268,6 @@ async function clientBuild(
 	container: AstroBuildPluginContainer
 ) {
 	const { settings, viteConfig } = opts;
-	const timer = performance.now();
 	const ssr = isServerLikeOutput(settings.config);
 	const out = ssr ? settings.config.build.client : getOutDirWithinCwd(settings.config.outDir);
 
@@ -287,13 +282,11 @@ async function clientBuild(
 	}
 
 	const { lastVitePlugins, vitePlugins } = await container.runBeforeHook('client', input);
-	opts.logger.info(null, `\n${bgGreen(black(' building client '))}`);
+	opts.logger.info('SKIP_FORMAT', `\n${bgGreen(black(' building client (vite) '))}`);
 
 	const viteBuildConfig: vite.InlineConfig = {
 		...viteConfig,
 		mode: viteConfig.mode || 'production',
-		// Check using `settings...` as `viteConfig` always defaults to `warn` by Astro
-		logLevel: settings.config.vite.logLevel ?? 'info',
 		build: {
 			target: 'esnext',
 			...viteConfig.build,
@@ -326,7 +319,6 @@ async function clientBuild(
 	});
 
 	const buildResult = await vite.build(viteBuildConfig);
-	opts.logger.info(null, dim(`Completed in ${getTimeStat(timer, performance.now())}.\n`));
 	return buildResult;
 }
 
